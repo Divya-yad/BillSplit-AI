@@ -7,6 +7,7 @@ sanity checks, and computes subtotals/totals server-side (never LLM-side).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -44,8 +45,8 @@ def get_client() -> genai.Client:
 
 # Model configuration via environment variables (with fallback)
 def get_model_name() -> str:
-    """Primary Gemini model from environment (default: gemini-flash-latest)."""
-    return os.getenv("GEMINI_MODEL_NAME") or os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
+    """Primary Gemini model from environment (default: gemini-2.5-flash)."""
+    return os.getenv("GEMINI_MODEL_NAME") or os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
 
 
 def get_fallback_model_name() -> str:
@@ -57,11 +58,11 @@ def get_candidate_models() -> list[str]:
     """Ordered candidate model list: primary, fallback, plus backup models."""
     primary = get_model_name()
     fallback = get_fallback_model_name()
-    candidates = [primary, fallback, "gemini-2.5-flash", "gemini-3.6-flash"]
+    candidates = [primary, fallback, "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash"]
     seen = set()
     ordered: list[str] = []
     for m in candidates:
-        if m and m not in seen:
+        if m and m not in seen and m != "gemini-flash-latest":
             seen.add(m)
             ordered.append(m)
     return ordered
@@ -311,10 +312,13 @@ async def extract_bill(image_bytes_list: list[bytes], bill_id: str) -> Extracted
 
         for model_candidate in candidates:
             try:
-                response = await client.aio.models.generate_content(
-                    model=model_candidate,
-                    contents=request_contents,
-                    config=generation_config,
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=model_candidate,
+                        contents=request_contents,
+                        config=generation_config,
+                    ),
+                    timeout=25.0,
                 )
                 return response.text, model_candidate
             except Exception as err:

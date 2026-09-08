@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/bills',
-  timeout: 60000, // Gemini can take a few seconds
+  timeout: 120000, // Allow up to 2 minutes for multimodal AI vision extraction
 })
 
 /**

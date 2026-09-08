@@ -114,13 +114,13 @@ def _downscale(img: Image.Image, max_long_edge: int = 4000) -> Image.Image:
 def preprocess_image(raw_bytes: bytes) -> bytes:
     """
     Full preprocessing pipeline. Returns JPEG bytes ready for Gemini.
-    Pipeline: orient → deskew → CLAHE → downscale → JPEG encode
+    Pipeline: orient → downscale (2000px) → deskew → CLAHE → JPEG encode
     """
     img = Image.open(io.BytesIO(raw_bytes))
     img = _auto_orient(img)
+    img = _downscale(img, max_long_edge=2000)
     img = _deskew(img)
     img = _apply_clahe(img)
-    img = _downscale(img)
 
     # Convert to RGB if needed (removes alpha channel, handles palette modes)
     if img.mode != "RGB":
