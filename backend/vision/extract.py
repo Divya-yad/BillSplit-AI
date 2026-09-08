@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from decimal import Decimal, InvalidOperation
 
@@ -161,18 +162,23 @@ def _to_decimal(val: str | int | float | None) -> Decimal | None:
         return None
 
 
+def _clean_json_str(raw: str) -> str:
+    """Robustly extract JSON from model output, handling markdown blocks or preambles."""
+    clean = raw.strip()
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean)
+    if match:
+        return match.group(1).strip()
+    first_brace = clean.find("{")
+    last_brace = clean.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return clean[first_brace : last_brace + 1].strip()
+    return clean
+
+
 def _parse_raw_json(raw: str, bill_id: str) -> ExtractedBill:
     """Parse and validate Gemini's JSON response into an ExtractedBill."""
-    # Strip any accidental markdown fences
-    clean_raw = raw.strip()
-    if clean_raw.startswith("```"):
-        clean_raw = clean_raw.split("```")[1]
-        if clean_raw.startswith("json"):
-            clean_raw = clean_raw[4:]
-    if clean_raw.endswith("```"):
-        clean_raw = clean_raw[:-3]
-
-    data = json.loads(clean_raw.strip())
+    clean_raw = _clean_json_str(raw)
+    data = json.loads(clean_raw)
 
     line_items = []
     for idx, li in enumerate(data.get("line_items", [])):
@@ -312,20 +318,24 @@ async def extract_bill(image_bytes_list: list[bytes], bill_id: str) -> Extracted
 
         for model_candidate in candidates:
             try:
+                logger.info("Calling Gemini with model '%s'", model_candidate)
                 response = await asyncio.wait_for(
                     client.aio.models.generate_content(
                         model=model_candidate,
                         contents=request_contents,
                         config=generation_config,
                     ),
-                    timeout=25.0,
+                    timeout=60.0,
                 )
-                return response.text, model_candidate
+                if response and response.text:
+                    return response.text, model_candidate
+                logger.warning("Model '%s' returned empty response text", model_candidate)
             except Exception as err:
                 logger.warning(
-                    "Gemini generation with model '%s' failed: %s",
+                    "Gemini generation with model '%s' failed: %s (%s)",
                     model_candidate,
                     err,
+                    type(err).__name__,
                 )
                 last_err = err
                 continue
